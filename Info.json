@@ -1,0 +1,10 @@
+{
+	"Id": "KeyboardNotches",
+	"DisplayName": "Keyboard Notches",
+	"Author": "Vanguard",
+	"Version": "1.0.0",
+	"AssemblyName": "KeyboardNotches.dll",
+	"EntryMethod": "KeyboardNotches.Main.Load",
+	"HomePage": "https://www.nexusmods.com/derailvalley/mods/562",
+	"Repository": "https://raw.githubusercontent.com/mricher-git/KeyboardNotches/master/Repository.json"
+}
