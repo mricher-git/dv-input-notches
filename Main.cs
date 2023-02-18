@@ -48,114 +48,133 @@ namespace KeyboardNotches
     {
         public static void Postfix(ControlSpec spec)
         {
+            EvaluateLever(spec);
+        }
+
+        public static void EvaluateLever(ControlSpec spec)
+        {
             if (spec is Lever lever)
             {
-                switch (lever.name)
+                TrainCar car = TrainCar.Resolve(spec.gameObject);
+                if (car != null && car.IsLoco)
                 {
-                    case "C throttle":
-                    case "C throttle regulator":
-                        ThrottleLever = lever;
-                        ThrottleScroll = lever.GetComponent<IMouseWheelHoverScrollable>();
-                        break;
-                    case "C independent_brake_lever":
-                    case "C independent brake":
-                        IndependantBrakeLever = lever;
-                        IndependantBrakeeScroll = lever.GetComponent<IMouseWheelHoverScrollable>();
-                        break;
-                    case "C train_brake_lever":
-                    case "C brake":
-                        BrakeLever = lever;
-                        BrakeScroll = lever.GetComponent<IMouseWheelHoverScrollable>();
-                        break;
+                    var loco = car.gameObject;
+                    switch (lever.name)
+                    {
+                        case "C throttle":
+                        case "C throttle regulator":
+                            ThrottleControls[loco] = new LocoControls(lever, lever.GetComponent<IMouseWheelHoverScrollable>());
+                            break;
+                        case "C train_brake_lever":
+                        case "C brake":
+                            BrakeControls[loco] = new LocoControls(lever, lever.GetComponent<IMouseWheelHoverScrollable>());
+                            break;
+                        case "C independent_brake_lever":
+                        case "C independent brake":
+                            IndBrakeControls[loco] = new LocoControls(lever, lever.GetComponent<IMouseWheelHoverScrollable>());
+                            break;
+                    }
                 }
             }
         }
 
-        public static Lever ThrottleLever;
-        public static Lever IndependantBrakeLever;
-        public static Lever BrakeLever;
-        public static IMouseWheelHoverScrollable ThrottleScroll;
-        public static IMouseWheelHoverScrollable IndependantBrakeeScroll;
-        public static IMouseWheelHoverScrollable BrakeScroll;
+        public static readonly Dictionary<GameObject, LocoControls> ThrottleControls = new Dictionary<GameObject, LocoControls>();
+        public static readonly Dictionary<GameObject, LocoControls> BrakeControls = new Dictionary<GameObject, LocoControls>();
+        public static readonly Dictionary<GameObject, LocoControls> IndBrakeControls = new Dictionary<GameObject, LocoControls>();
+
+        public static void FindLevers(TrainCar loco)
+        {
+            foreach (var lever in loco.interior?.GetComponentsInChildren<Lever>())
+            {
+                EvaluateLever(lever);
+            }
+        }
     }
 
     public static class KeyboardNotchPatch
     {
         public static bool TryApplyInput(KeyCode[] keyIncrease, KeyCode[] keyDecrease, Lever lever, IMouseWheelHoverScrollable scroller, ref float timer)
         {
-            if (keyIncrease.IsPressed())
+            if (!SingletonBehaviour<InputFocusManager>.Instance.hasKeyboardFocus)
             {
-                if (keyIncrease.IsDown())
+                if (keyIncrease.IsPressed())
                 {
-                    if (lever.scrollWheelHoverScroll > 0)
+                    if (keyIncrease.IsDown())
                     {
-                        scroller.OnHoverScrolledUp();
+                        if (lever.scrollWheelHoverScroll > 0f)
+                        {
+                            scroller.OnHoverScrolledUp();
+                        }
+                        else
+                        {
+                            scroller.OnHoverScrolledDown();
+                        }
+                        timer = 0.3f;
+                        return false;
                     }
                     else
                     {
-                        scroller.OnHoverScrolledDown();
+                        timer -= Time.deltaTime;
+
+                        if (timer <= 0f) return true;
                     }
-                    timer = 0.016f;
                     return false;
                 }
-                else
+                else if (keyDecrease.IsPressed())
                 {
-                    timer += Time.deltaTime;
-
-                    if (timer > 0.3f) return true;
-                }
-                return false;
-            }
-            if (keyDecrease.IsPressed())
-            {
-                if (keyDecrease.IsDown())
-                {
-                    if (lever.scrollWheelHoverScroll > 0)
+                    if (keyDecrease.IsDown())
                     {
-                        scroller.OnHoverScrolledDown();
+                        if (lever.scrollWheelHoverScroll > 0f)
+                        {
+                            scroller.OnHoverScrolledDown();
+                        }
+                        else
+                        {
+                            scroller.OnHoverScrolledUp();
+                        }
+                        timer = 0.3f;
+                        return false;
                     }
                     else
                     {
-                        scroller.OnHoverScrolledUp();
+                        timer -= Time.deltaTime;
+
+                        if (timer <= 0f) return true;
                     }
-                    timer = 0f;
                     return false;
                 }
-                else
-                {
-                    timer += Time.deltaTime;
+            }
 
-                    if (timer > 0.3f) return true;
-                }
-                return false;
-            }
-            if (timer > 0)
+            if (timer > 0f)
             {
-                timer += Time.deltaTime;
+                timer -= Time.deltaTime;
             }
-            if (timer > 0.3f)
+            if (timer < 0f)
             {
                 scroller.OnHoverScrollReleased();
                 timer = 0;
             }
-            
+
             return false;
         }
     }
 
     [HarmonyPatch(typeof(LocoKeyboardInputDiesel), "TryApplyThrottleInput")]
-    public static class DieselPatch01
+    public static class DieselTryApplyThrottlePatch
     {
-        public static bool Prefix()
+        public static bool Prefix(LocoKeyboardInputDiesel __instance, ref float ___throttleVelo)
         {
-            if (ControlsInstantiatorPatch.ThrottleLever == null)
+            if (___throttleVelo == 0) ___throttleVelo = 0.001f;
+            LocoControls controls;
+            if (!ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls))
             {
-                return true;
+                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
+                ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls);
             }
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseThrottleKeys, 
-                                                    KeyBindings.decreaseThrottleKeys, 
-                                                    ControlsInstantiatorPatch.ThrottleLever, 
-                                                    ControlsInstantiatorPatch.ThrottleScroll,
+                                                    KeyBindings.decreaseThrottleKeys,
+                                                    controls.Lever,
+                                                    controls.Scroll,
                                                     ref DelayTimer);
         }
 
@@ -163,14 +182,20 @@ namespace KeyboardNotches
     }
 
     [HarmonyPatch(typeof(LocoKeyboardInputDiesel), "TryApplyBrakeInput")]
-    public static class DieselPatch02
+    public static class DieselTryApplyBrakePatch
     {
-        public static bool Prefix()
+        public static bool Prefix(LocoKeyboardInputDiesel __instance)
         {
+            LocoControls controls;
+            if (!ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls))
+            {
+                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
+                ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls);
+            }
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseBrakeKeys,
                                                     KeyBindings.decreaseBrakeKeys,
-                                                    ControlsInstantiatorPatch.BrakeLever,
-                                                    ControlsInstantiatorPatch.BrakeScroll,
+                                                    controls.Lever,
+                                                    controls.Scroll,
                                                     ref DelayTimer);
         }
 
@@ -178,14 +203,20 @@ namespace KeyboardNotches
     }
 
     [HarmonyPatch(typeof(LocoKeyboardInputDiesel), "TryApplyIndependentBrakeInput")]
-    public static class DieselPatch03
+    public static class DieselTryApplyIndBrakePatch
     {
-        public static bool Prefix()
+        public static bool Prefix(LocoKeyboardInputDiesel __instance)
         {
+            LocoControls controls;
+            if (!ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls))
+            {
+                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
+                ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls);
+            }
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseIndependentBrakeKeys,
                                                     KeyBindings.decreaseIndependentBrakeKeys,
-                                                    ControlsInstantiatorPatch.IndependantBrakeLever,
-                                                    ControlsInstantiatorPatch.IndependantBrakeeScroll,
+                                                    controls.Lever,
+                                                    controls.Scroll,
                                                     ref DelayTimer);
         }
 
@@ -193,14 +224,21 @@ namespace KeyboardNotches
     }
 
     [HarmonyPatch(typeof(LocoKeyboardInputShunter), "TryApplyThrottleInput")]
-    public static class ShunterPatch01
+    public static class ShunterTryApplyThrottlePatch
     {
-        public static bool Prefix()
+        public static bool Prefix(LocoKeyboardInputDiesel __instance, ref float ___throttleVelo)
         {
+            if (___throttleVelo == 0) ___throttleVelo = 0.001f;
+            LocoControls controls;
+            if (!ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls))
+            {
+                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
+                ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls);
+            }
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseThrottleKeys,
                                                     KeyBindings.decreaseThrottleKeys,
-                                                    ControlsInstantiatorPatch.ThrottleLever,
-                                                    ControlsInstantiatorPatch.ThrottleScroll,
+                                                    controls.Lever,
+                                                    controls.Scroll,
                                                     ref DelayTimer);
         }
 
@@ -208,14 +246,20 @@ namespace KeyboardNotches
     }
 
     [HarmonyPatch(typeof(LocoKeyboardInputShunter), "TryApplyBrakeInput")]
-    public static class ShunterPatch02
+    public static class ShunterTryApplyBrakePatch
     {
-        public static bool Prefix()
+        public static bool Prefix(LocoKeyboardInputDiesel __instance)
         {
+            LocoControls controls;
+            if (!ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls))
+            {
+                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
+                ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls);
+            }
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseBrakeKeys,
                                                     KeyBindings.decreaseBrakeKeys,
-                                                    ControlsInstantiatorPatch.BrakeLever,
-                                                    ControlsInstantiatorPatch.BrakeScroll,
+                                                    controls.Lever,
+                                                    controls.Scroll,
                                                     ref DelayTimer);
         }
 
@@ -223,14 +267,20 @@ namespace KeyboardNotches
     }
 
     [HarmonyPatch(typeof(LocoKeyboardInputShunter), "TryApplyIndependentBrakeInput")]
-    public static class ShunterPatch03
+    public static class ShunterTryApplyIndBrakePatch
     {
-        public static bool Prefix()
+        public static bool Prefix(LocoKeyboardInputDiesel __instance)
         {
+            LocoControls controls;
+            if (!ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls))
+            {
+                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
+                ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls);
+            }
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseIndependentBrakeKeys,
                                                     KeyBindings.decreaseIndependentBrakeKeys,
-                                                    ControlsInstantiatorPatch.IndependantBrakeLever,
-                                                    ControlsInstantiatorPatch.IndependantBrakeeScroll,
+                                                    controls.Lever,
+                                                    controls.Scroll,
                                                     ref DelayTimer);
         }
 
@@ -238,14 +288,20 @@ namespace KeyboardNotches
     }
 
     [HarmonyPatch(typeof(LocoKeyboardInputSteam), "TryApplyThrottleInput")]
-    public static class SteamPatch01
+    public static class SteamTryApplyThrottlePatch
     {
-        public static bool Prefix()
+        public static bool Prefix(LocoKeyboardInputDiesel __instance)
         {
+            LocoControls controls;
+            if (!ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls))
+            {
+                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
+                ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls);
+            }
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseThrottleKeys,
                                                     KeyBindings.decreaseThrottleKeys,
-                                                    ControlsInstantiatorPatch.ThrottleLever,
-                                                    ControlsInstantiatorPatch.ThrottleScroll,
+                                                    controls.Lever,
+                                                    controls.Scroll,
                                                     ref DelayTimer);
         }
 
@@ -253,46 +309,73 @@ namespace KeyboardNotches
     }
 
     [HarmonyPatch(typeof(LocoKeyboardInputSteam), "TryApplyBrakeInput")]
-    public static class SteamPatch02
+    public static class SteamTryApplyBrakePatch
     {
-        public static bool Prefix()
+        public static bool Prefix(LocoKeyboardInputDiesel __instance)
         {
-            return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseBrakeKeys, KeyBindings.decreaseBrakeKeys, ControlsInstantiatorPatch.BrakeLever, ControlsInstantiatorPatch.BrakeScroll, ref DelayTimer);
+            LocoControls controls;
+            if (!ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls))
+            {
+                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
+                ControlsInstantiatorPatch.BrakeControls .TryGetValue(__instance.gameObject, out controls);
+            }
+            return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseBrakeKeys,
+                                                    KeyBindings.decreaseBrakeKeys,
+                                                    controls.Lever,
+                                                    controls.Scroll,
+                                                    ref DelayTimer);
         }
          private static float DelayTimer;
     }
 
     [HarmonyPatch(typeof(LocoKeyboardInputSteam), "TryApplyIndependentBrakeInput")]
-    public static class SteamPatch03
+    public static class SteamTryApplyIndBrakePatch
     {
-        public static bool Prefix()
+        public static bool Prefix(LocoKeyboardInputDiesel __instance)
         {
-            return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseIndependentBrakeKeys, KeyBindings.decreaseIndependentBrakeKeys, ControlsInstantiatorPatch.IndependantBrakeLever, ControlsInstantiatorPatch.IndependantBrakeeScroll, ref DelayTimer);
+            LocoControls controls;
+            if (!ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls))
+            {
+                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
+                ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls);
+            }
+            
+            return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseIndependentBrakeKeys,
+                                                    KeyBindings.decreaseIndependentBrakeKeys,
+                                                    controls.Lever,
+                                                    controls.Scroll,
+                                                    ref DelayTimer);
         }
          private static float DelayTimer;
     }
 
-    [HarmonyPatch(typeof(LocoControllerBase), "PairRemoteController")]
-    public static class LeverNotches
-    {
-        public static void Postfix()
-        {
-            ThrottleNotches = ControlsInstantiatorPatch.ThrottleLever.notches;
-            IndBrakeNotches = ControlsInstantiatorPatch.IndependantBrakeLever.notches;
-            BrakeNotches = ControlsInstantiatorPatch.BrakeLever.notches;
-        }
+    //[HarmonyPatch(typeof(LocoControllerBase), "PairRemoteController")]
+    //public static class LeverNotches
+    //{
+    //    public static void Postfix(TrainCar ___train)
+    //    {
+    //        ThrottleNotches.Add(___train, ControlsInstantiatorPatch.ThrottleLever.notches);
+    //        BrakeNotches.Add(___train, ControlsInstantiatorPatch.BrakeLever.notches);
+    //        IndBrakeNotches.Add(___train, ControlsInstantiatorPatch.IndependantBrakeLever.notches);
+    //    }
 
-        public static int ThrottleNotches = 20;
-        public static int BrakeNotches = 20;
-        public static int IndBrakeNotches = 20;
-    }
+    //    public static readonly Dictionary<TrainCar, int> ThrottleNotches = new Dictionary<TrainCar, int>();
+    //    public static readonly Dictionary<TrainCar, int> BrakeNotches = new Dictionary<TrainCar, int>();
+    //    public static readonly Dictionary<TrainCar, int> IndBrakeNotches = new Dictionary<TrainCar, int>();
+    //}
 
     [HarmonyPatch(typeof(LocoControllerBase), "UpdateThrottle")]
     public static class RemoteThrottlePatch
     {
         public static bool Prefix(float factor, LocoControllerBase __instance)
         {
-            var notches = LeverNotches.ThrottleNotches - 1;
+            LocoControls controls;
+            int notches = 20;
+            if (ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls))
+            {
+                notches = controls.Lever.notches - 1;
+            }
+
             if (factor != 0)
             {
                 if (RemoteThrottlePatch.Pressed == false)
@@ -301,7 +384,7 @@ namespace KeyboardNotches
                     var notchedTarget = Mathf.Floor(__instance.targetThrottle * notches + 0.25f) / notches;
                     notchedTarget += (factor > 0 ? 1.0f : -1.0f) / notches;
                     __instance.SetThrottle(notchedTarget);
-                    RemoteThrottlePatch.DelayTimer = Time.time + 0.2f;
+                    RemoteThrottlePatch.DelayTimer = Time.time + 0.3f;
                 }
                 else
                 {
@@ -317,7 +400,6 @@ namespace KeyboardNotches
             {
                 RemoteThrottlePatch.Pressed = false;
             }
-
             return false;
         }
         private static bool Pressed = false;
@@ -329,7 +411,13 @@ namespace KeyboardNotches
     {
         public static bool Prefix(float factor, LocoControllerBase __instance)
         {
-            var notches = LeverNotches.BrakeNotches - 1;
+            LocoControls controls;
+            int notches = 20;
+            if (ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls))
+            {
+                notches = controls.Lever.notches - 1;
+            }
+
             if (factor != 0)
             {
                 if (RemoteBrakePatch.Pressed == false)
@@ -338,7 +426,7 @@ namespace KeyboardNotches
                     var notchedTarget = Mathf.Floor(__instance.targetBrake * notches + 0.25f) / notches;
                     notchedTarget += (factor > 0 ? 1.0f : -1.0f) / notches;
                     __instance.SetBrake(notchedTarget);
-                    RemoteBrakePatch.DelayTimer = Time.time + 0.2f;
+                    RemoteBrakePatch.DelayTimer = Time.time + 0.3f;
                 }
                 else
                 {
@@ -365,7 +453,13 @@ namespace KeyboardNotches
     {
         public static bool Prefix(float factor, LocoControllerBase __instance)
         {
-            var notches = LeverNotches.IndBrakeNotches - 1;
+            LocoControls controls;
+            int notches = 20;
+            if (ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls))
+            {
+                notches = controls.Lever.notches - 1;
+            }
+
             if (factor != 0)
             {
                 if (RemoteIndependantBrakePatch.Pressed == false)
@@ -374,7 +468,7 @@ namespace KeyboardNotches
                     var notchedTarget = Mathf.Floor(__instance.targetIndependentBrake * notches + 0.25f) / notches;
                     notchedTarget += (factor > 0 ? 1.0f : -1.0f) / notches;
                     __instance.SetIndependentBrake(notchedTarget);
-                    RemoteIndependantBrakePatch.DelayTimer = Time.time + 0.2f;
+                    RemoteIndependantBrakePatch.DelayTimer = Time.time + 0.3f;
                 }
                 else
                 {
@@ -445,5 +539,17 @@ namespace KeyboardNotches
 
             return codeMatcher.InstructionEnumeration();
         }
+    }
+
+    public struct LocoControls
+    {
+        public LocoControls(Lever lever, IMouseWheelHoverScrollable scroll)
+        {
+            Lever = lever;
+            Scroll = scroll;
+        }
+
+        public Lever Lever { get; }
+        public IMouseWheelHoverScrollable Scroll { get; }
     }
 }
