@@ -14,19 +14,25 @@ namespace KeyboardNotches
     public static class Main
     {
         public static bool Enabled;
-        internal static UnityModManager.ModEntry Mod;
+        public static UnityModManager.ModEntry Mod;
         internal static Harmony HarmonyInst;
+        public static Settings settings;
 
         public static bool Load(UnityModManager.ModEntry modEntry)
         {
             Mod = modEntry;
             HarmonyInst = new Harmony(modEntry.Info.Id);
+
+            settings = Settings.Load<Settings>(modEntry);
+
             modEntry.OnToggle = OnToggle;
+            modEntry.OnGUI = OnGUI;
+            modEntry.OnSaveGUI = OnSaveGUI;
 
             return true;
         }
 
-        public static bool OnToggle(UnityModManager.ModEntry modEntry, bool value)
+        private static bool OnToggle(UnityModManager.ModEntry modEntry, bool value)
         {
             if (value)
             {
@@ -41,6 +47,16 @@ namespace KeyboardNotches
 
             return true;
         }
+
+        private static void OnGUI(UnityModManager.ModEntry modEntry)
+        {
+            settings.Draw(modEntry);
+        }
+
+        private static void OnSaveGUI(UnityModManager.ModEntry modEntry)
+        {
+            settings.Save(modEntry);
+        }
     }
 
     [HarmonyPatch(typeof(ControlsInstantiator), nameof(ControlsInstantiator.Spawn))]
@@ -51,6 +67,52 @@ namespace KeyboardNotches
             EvaluateLever(spec);
         }
 
+        private static bool? CCLactive = null;
+        private static System.Type CabInputRelayType;
+        private static FieldInfo Binding;
+        private static bool HasCCLInputBinding(ControlSpec spec, string targetBinding)
+        {
+            CCLactive = CCLactive ?? UnityModManager.FindMod("DVCustomCarLoader")?.Active ?? false;
+            if (CCLactive != true)
+            {
+                return false;
+            }
+            CabInputRelayType = CabInputRelayType ?? AccessTools.TypeByName("DVCustomCarLoader.LocoComponents.CabInputRelay");
+            Binding = Binding ?? AccessTools.Field(CabInputRelayType, "Binding");
+
+            if (spec.GetComponent(CabInputRelayType) is Component cabInputRelay)
+                    return Binding.GetValue(cabInputRelay).ToString() == targetBinding;
+
+            return false;
+        }
+
+        private static bool IsThrottleControl(Lever spec)
+        {
+            if (spec.name == "C throttle" || spec.name == "C throttle regulator")
+                return true;
+            if (HasCCLInputBinding(spec, "Throttle"))
+                return true;
+            return false;
+        }
+        private static bool IsTrainBrakeControl(Lever spec)
+        {
+            if (spec.name == "C train_brake_lever" || spec.name == "C brake")
+                return true;
+            if (HasCCLInputBinding(spec, "TrainBrake"))
+                return true;
+            return false;
+        }
+
+        private static bool IsIndependentBrakeControl(Lever spec)
+        {
+            if (spec.name == "C independent_brake_lever" || spec.name == "C independent brake")
+                return true;
+            if (HasCCLInputBinding(spec, "IndependentBrake"))
+                return true;
+            return false;
+        }
+
+
         public static void EvaluateLever(ControlSpec spec)
         {
             if (spec is Lever lever)
@@ -59,20 +121,18 @@ namespace KeyboardNotches
                 if (car != null && car.IsLoco)
                 {
                     var loco = car.gameObject;
-                    switch (lever.name)
+
+                    if (IsThrottleControl(lever))
                     {
-                        case "C throttle":
-                        case "C throttle regulator":
-                            ThrottleControls[loco] = new LocoControls(lever, lever.GetComponent<IMouseWheelHoverScrollable>());
-                            break;
-                        case "C train_brake_lever":
-                        case "C brake":
-                            BrakeControls[loco] = new LocoControls(lever, lever.GetComponent<IMouseWheelHoverScrollable>());
-                            break;
-                        case "C independent_brake_lever":
-                        case "C independent brake":
-                            IndBrakeControls[loco] = new LocoControls(lever, lever.GetComponent<IMouseWheelHoverScrollable>());
-                            break;
+                        ThrottleControls[loco] = new LocoControls(lever, lever.GetComponent<IMouseWheelHoverScrollable>());
+                    }
+                    else if (IsTrainBrakeControl(lever)) 
+                    {
+                        BrakeControls[loco] = new LocoControls(lever, lever.GetComponent<IMouseWheelHoverScrollable>());
+                    }
+                    else if (IsIndependentBrakeControl(lever))
+                    {
+                        IndBrakeControls[loco] = new LocoControls(lever, lever.GetComponent<IMouseWheelHoverScrollable>());
                     }
                 }
             }
@@ -164,13 +224,11 @@ namespace KeyboardNotches
     {
         public static bool Prefix(LocoKeyboardInputDiesel __instance, ref float ___throttleVelo)
         {
+            if (!(Main.settings.EnableDiesel == true && Main.settings.DieselSettings?.Throttle == true)) return true;
             if (___throttleVelo == 0) ___throttleVelo = 0.001f;
-            LocoControls controls;
-            if (!ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls))
-            {
-                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
-                ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls);
-            }
+
+            if (!ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out LocoControls controls)) return true;
+
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseThrottleKeys, 
                                                     KeyBindings.decreaseThrottleKeys,
                                                     controls.Lever,
@@ -186,12 +244,10 @@ namespace KeyboardNotches
     {
         public static bool Prefix(LocoKeyboardInputDiesel __instance)
         {
-            LocoControls controls;
-            if (!ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls))
-            {
-                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
-                ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls);
-            }
+            if (!(Main.settings.EnableDiesel == true && Main.settings.DieselSettings?.Brake == true)) return true;
+
+            if (!ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out LocoControls controls)) return true;
+
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseBrakeKeys,
                                                     KeyBindings.decreaseBrakeKeys,
                                                     controls.Lever,
@@ -207,12 +263,10 @@ namespace KeyboardNotches
     {
         public static bool Prefix(LocoKeyboardInputDiesel __instance)
         {
-            LocoControls controls;
-            if (!ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls))
-            {
-                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
-                ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls);
-            }
+            if (!(Main.settings.EnableDiesel == true && Main.settings.DieselSettings?.IndBrake == true)) return true;
+
+            if (!ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out LocoControls controls)) return true;
+
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseIndependentBrakeKeys,
                                                     KeyBindings.decreaseIndependentBrakeKeys,
                                                     controls.Lever,
@@ -226,15 +280,14 @@ namespace KeyboardNotches
     [HarmonyPatch(typeof(LocoKeyboardInputShunter), "TryApplyThrottleInput")]
     public static class ShunterTryApplyThrottlePatch
     {
-        public static bool Prefix(LocoKeyboardInputDiesel __instance, ref float ___throttleVelo)
+        public static bool Prefix(LocoKeyboardInputShunter __instance, ref float ___throttleVelo)
         {
+            if (!(Main.settings.EnableShunter == true && Main.settings.ShunterSettings?.Throttle == true)) return true;
+
             if (___throttleVelo == 0) ___throttleVelo = 0.001f;
-            LocoControls controls;
-            if (!ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls))
-            {
-                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
-                ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls);
-            }
+
+            if (!ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out LocoControls controls)) return true;
+            
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseThrottleKeys,
                                                     KeyBindings.decreaseThrottleKeys,
                                                     controls.Lever,
@@ -248,14 +301,12 @@ namespace KeyboardNotches
     [HarmonyPatch(typeof(LocoKeyboardInputShunter), "TryApplyBrakeInput")]
     public static class ShunterTryApplyBrakePatch
     {
-        public static bool Prefix(LocoKeyboardInputDiesel __instance)
+        public static bool Prefix(LocoKeyboardInputShunter __instance)
         {
-            LocoControls controls;
-            if (!ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls))
-            {
-                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
-                ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls);
-            }
+            if (!(Main.settings.EnableShunter == true && Main.settings.ShunterSettings?.Brake == true)) return true;
+
+            if (!ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out LocoControls controls)) return true;
+
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseBrakeKeys,
                                                     KeyBindings.decreaseBrakeKeys,
                                                     controls.Lever,
@@ -269,14 +320,12 @@ namespace KeyboardNotches
     [HarmonyPatch(typeof(LocoKeyboardInputShunter), "TryApplyIndependentBrakeInput")]
     public static class ShunterTryApplyIndBrakePatch
     {
-        public static bool Prefix(LocoKeyboardInputDiesel __instance)
+        public static bool Prefix(LocoKeyboardInputShunter __instance)
         {
-            LocoControls controls;
-            if (!ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls))
-            {
-                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
-                ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls);
-            }
+            if (!(Main.settings.EnableShunter == true && Main.settings.ShunterSettings?.IndBrake == true)) return true;
+
+            if (!ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out LocoControls controls)) return true;
+
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseIndependentBrakeKeys,
                                                     KeyBindings.decreaseIndependentBrakeKeys,
                                                     controls.Lever,
@@ -290,14 +339,12 @@ namespace KeyboardNotches
     [HarmonyPatch(typeof(LocoKeyboardInputSteam), "TryApplyThrottleInput")]
     public static class SteamTryApplyThrottlePatch
     {
-        public static bool Prefix(LocoKeyboardInputDiesel __instance)
+        public static bool Prefix(LocoKeyboardInputSteam __instance)
         {
-            LocoControls controls;
-            if (!ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls))
-            {
-                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
-                ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls);
-            }
+            if (!(Main.settings.EnableSteam == true && Main.settings.SteamSettings?.Throttle == true)) return true;
+
+            if (!ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out LocoControls controls)) return true;
+
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseThrottleKeys,
                                                     KeyBindings.decreaseThrottleKeys,
                                                     controls.Lever,
@@ -311,14 +358,12 @@ namespace KeyboardNotches
     [HarmonyPatch(typeof(LocoKeyboardInputSteam), "TryApplyBrakeInput")]
     public static class SteamTryApplyBrakePatch
     {
-        public static bool Prefix(LocoKeyboardInputDiesel __instance)
+        public static bool Prefix(LocoKeyboardInputSteam __instance)
         {
-            LocoControls controls;
-            if (!ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls))
-            {
-                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
-                ControlsInstantiatorPatch.BrakeControls .TryGetValue(__instance.gameObject, out controls);
-            }
+            if (!(Main.settings.EnableSteam == true && Main.settings.SteamSettings?.Brake == true)) return true;
+
+            if (!ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out LocoControls controls)) return true;
+
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseBrakeKeys,
                                                     KeyBindings.decreaseBrakeKeys,
                                                     controls.Lever,
@@ -331,14 +376,11 @@ namespace KeyboardNotches
     [HarmonyPatch(typeof(LocoKeyboardInputSteam), "TryApplyIndependentBrakeInput")]
     public static class SteamTryApplyIndBrakePatch
     {
-        public static bool Prefix(LocoKeyboardInputDiesel __instance)
+        public static bool Prefix(LocoKeyboardInputSteam __instance)
         {
-            LocoControls controls;
-            if (!ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls))
-            {
-                ControlsInstantiatorPatch.FindLevers(__instance.control.train);
-                ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls);
-            }
+            if (!(Main.settings.EnableSteam == true && Main.settings.SteamSettings?.IndBrake == true)) return true;
+
+            if (!ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out LocoControls controls)) return true;
             
             return KeyboardNotchPatch.TryApplyInput(KeyBindings.increaseIndependentBrakeKeys,
                                                     KeyBindings.decreaseIndependentBrakeKeys,
@@ -369,9 +411,8 @@ namespace KeyboardNotches
     {
         public static bool Prefix(float factor, LocoControllerBase __instance)
         {
-            LocoControls controls;
             int notches = 20;
-            if (ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out controls))
+            if (ControlsInstantiatorPatch.ThrottleControls.TryGetValue(__instance.gameObject, out LocoControls controls))
             {
                 notches = controls.Lever.notches - 1;
             }
@@ -411,9 +452,8 @@ namespace KeyboardNotches
     {
         public static bool Prefix(float factor, LocoControllerBase __instance)
         {
-            LocoControls controls;
             int notches = 20;
-            if (ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out controls))
+            if (ControlsInstantiatorPatch.BrakeControls.TryGetValue(__instance.gameObject, out LocoControls controls))
             {
                 notches = controls.Lever.notches - 1;
             }
@@ -453,9 +493,8 @@ namespace KeyboardNotches
     {
         public static bool Prefix(float factor, LocoControllerBase __instance)
         {
-            LocoControls controls;
             int notches = 20;
-            if (ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out controls))
+            if (ControlsInstantiatorPatch.IndBrakeControls.TryGetValue(__instance.gameObject, out LocoControls controls))
             {
                 notches = controls.Lever.notches - 1;
             }
