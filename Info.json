@@ -2,7 +2,7 @@
 	"Id": "KeyboardNotches",
 	"DisplayName": "Keyboard Notches",
 	"Author": "Vanguard",
-	"Version": "1.0.1",
+	"Version": "1.0.2",
 	"ManagerVersion": "0.24.6",
 	"AssemblyName": "KeyboardNotches.dll",
 	"EntryMethod": "KeyboardNotches.Main.Load",
