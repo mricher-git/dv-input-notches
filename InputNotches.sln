@@ -1,9 +1,15 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 16
-VisualStudioVersion = 16.0.33214.272
+# Visual Studio Version 17
+VisualStudioVersion = 17.6.33829.357
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KeyboardNotches", "KeyboardNotches.csproj", "{059C05CC-2923-4F1A-A687-8B9D0F9064C9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InputNotches", "InputNotches\InputNotches.csproj", "{059C05CC-2923-4F1A-A687-8B9D0F9064C9}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{815C9BDE-B462-49D6-B1F6-34E555B5643B}"
+	ProjectSection(SolutionItems) = preProject
+		README.md = README.md
+		Repository.json = Repository.json
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

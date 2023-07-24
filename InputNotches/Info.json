@@ -1,0 +1,11 @@
+{
+	"Id": "InputNotches",
+	"DisplayName": "Input Notches",
+	"Author": "Vanguard",
+	"Version": "2.0.0",
+	"ManagerVersion": "0.27.3",
+	"AssemblyName": "InputNotches.dll",
+	"EntryMethod": "InputNotches.Main.Load",
+	"HomePage": "https://www.nexusmods.com/derailvalley/mods/562",
+	"Repository": "https://raw.githubusercontent.com/mricher-git/dv-input-notches/master/Repository.json"
+}

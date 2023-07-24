@@ -5,11 +5,11 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("KeyboardNotches")]
+[assembly: AssemblyTitle("InputNotches")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("KeyboardNotches")]
+[assembly: AssemblyProduct("InputNotches")]
 [assembly: AssemblyCopyright("Copyright © Vanguard 2023")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
